@@ -1,4 +1,4 @@
-# MAD STUDIO - Replica
+# MAD STUDIO - Replica (with Zap)
 
 Replica is a Roblox server to client state replication solution which lets the developer subscribe certain players to certain states.
 

@@ -1,3 +1,7 @@
+-- Modified by bdidk235 (marked with 'deviation')
+--!native
+--!optimize 2
+--!nolint
 --[[
 MAD STUDIO
 
@@ -85,9 +89,9 @@ MAD STUDIO
 
 ----- Dependencies -----
 
+-- deviation
 local ReplicaShared = game.ReplicatedStorage.ReplicaShared
 local RateLimit = require(ReplicaShared.RateLimit)
-local Remote = require(ReplicaShared.Remote)
 local Signal = require(ReplicaShared.Signal)
 local Maid = require(ReplicaShared.Maid)
 
@@ -105,26 +109,16 @@ local Players = game:GetService("Players")
 
 local GlobalRateLimit = RateLimit.New(120)
 
-local ReadyPlayers: {[Player]: boolean} = {}
+-- deviation
+local ReadyPlayers: {[Player]: true} = {}
 
 local Replicas = {} -- {[id]: Replica}
 local TopReplicas = {} -- {[Replica]: true} -- Replicas with active subscription settings
 local ReplicationAllReplicas = {} -- {[Replica]: true} -- Replicas that had the method :Replicate() called on them
 local SelectiveSubscriptions = {} -- {[Player]: {[replica]: true}}
 
-local RemoteRequestData = Remote.New("ReplicaRequestData") -- Fired client-side when the client loads for the first time
-
-local RemoteSet = Remote.New("ReplicaSet")                 -- (replica_id, path, value)
-local RemoteSetValues = Remote.New("ReplicaSetValues")     -- (replica_id, path, values)
-local RemoteTableInsert = Remote.New("ReplicaTableInsert") -- (replica_id, path, value, index)
-local RemoteTableRemove = Remote.New("ReplicaTableRemove") -- (replica_id, path, index)
-local RemoteWrite = Remote.New("ReplicaWrite")             -- (replica_id, fn_id, ...)
-local RemoteSignal = Remote.New("ReplicaSignal")           -- (replica_id, ...)
-local RemoteParent = Remote.New("ReplicaParent")           -- (replica_id, parent_id)
-local RemoteCreate = Remote.New("ReplicaCreate")           -- (creation, root_id?) or ({creation, ...})
-local RemoteBind = Remote.New("ReplicaBind")               -- (replica_id)
-local RemoteDestroy = Remote.New("ReplicaDestroy")         -- (replica_id)
-local RemoteSignalUnreliable = Remote.New("ReplicaSignalUnreliable", true)   -- (replica_id, ...)
+-- deviation
+local Zap = require(script.Parent.ReplicaZap.Server)
 
 local Index = 0
 
@@ -153,24 +147,24 @@ local function LoadWriteLib(module: ModuleScript)
 	end
 	
 	if typeof(module) ~= "Instance" or module:IsA("ModuleScript") ~= true then
-		error(`[{script.Name}]: "WriteLib" is not a ModuleScript`)
+		error(`[Replica Server]: "WriteLib" is not a ModuleScript`)
 	elseif module:IsDescendantOf(ReplicatedStorage) == false then
-		error(`[{script.Name}]: "WriteLib" module must be a descendant of ReplicatedStorage`)
+		error(`[Replica Server]: "WriteLib" module must be a descendant of ReplicatedStorage`)
 	end
 
 	local loaded_module = require(module)
 	
 	if type(loaded_module) ~= "table" then
-		error(`[{script.Name}]: A "WriteLib" ModuleScript must return a table`)
+		error(`[Replica Server]: A "WriteLib" ModuleScript must return a table`)
 	end
 
 	local function_list = {} -- fn_id = {fn_name, fn}
 	
 	for key, value in pairs(loaded_module) do
 		if type(key) ~= "string" then
-			error(`[{script.Name}]: "WriteLib" table keys must be strings`)
+			error(`[Replica Server]: "WriteLib" table keys must be strings`)
 		elseif type(value) ~= "function" then
-			error(`[{script.Name}]: "WriteLib" table values must be functions`)
+			error(`[Replica Server]: "WriteLib" table values must be functions`)
 		end
 		table.insert(function_list, {key, value})
 	end
@@ -254,11 +248,11 @@ LockedReplica.__index = LockedReplica
 function Replica.Token(name: string)
 	
 	if type(name) ~= "string" then
-		error(`[{script.Name}]: name must be a string`)
+		error(`[Replica Server]: name must be a string`)
 	end
 	
 	if Tokens[name] == true then
-		error(`[{script.Name}]: Token "{name}" duplicate`)
+		error(`[Replica Server]: Token "{name}" duplicate`)
 	end
 	
 	Tokens[name] = true
@@ -281,13 +275,13 @@ function Replica.New(params: {Token: typeof(ReplicaToken), Tags: {}?, Data: {}?,
 	local write_lib = nil
 	
 	if TokenValidate[token] == nil then
-		error(`[{script.Name}]: "Token" is not valid ({tostring(token)})`)
+		error(`[Replica Server]: "Token" is not valid ({tostring(token)})`)
 	elseif type(tags) ~= "table" then
-		error(`[{script.Name}]: "Tags" is not a table`)
+		error(`[Replica Server]: "Tags" is not a table`)
 	elseif type(data) ~= "table" then
-		error(`[{script.Name}]: "Data" is not a table`)
+		error(`[Replica Server]: "Data" is not a table`)
 	elseif tags[BIND_TAG] ~= nil then
-		error(`[{script.Name}]: "Tags.{BIND_TAG}" key is reserved`)
+		error(`[Replica Server]: "Tags.{BIND_TAG}" key is reserved`)
 	end
 	
 	if params.WriteLib ~= nil then
@@ -351,7 +345,7 @@ function Replica:Set(path: {string}, value: any)
 	if WriteFlag == false then
 		local self_id = self.Id
 		if self.replication ~= nil then
-			if self.replication[REPLICATION_ALL] == true then
+			--[[if self.replication[REPLICATION_ALL] == true then
 				for player in pairs(ReadyPlayers) do
 					RemoteSet:FireClient(player, self_id, path, value)
 				end
@@ -359,7 +353,18 @@ function Replica:Set(path: {string}, value: any)
 				for player in pairs(self.replication) do
 					RemoteSet:FireClient(player, self_id, path, value)
 				end
+			end]]
+			local players = EMPTY_TABLE
+			if self.replication[REPLICATION_ALL] == true then
+				players = ReadyPlayers
+			else
+				players = self.replication
 			end
+			Zap.Set.FireSet(players, {
+				replica_id = self_id,
+				path = path,
+				value = value
+			})
 		end
 	end
 	
@@ -382,7 +387,7 @@ function Replica:SetValues(path: {string}, values: {[string]: any})
 	if WriteFlag == false then
 		local self_id = self.Id
 		if self.replication ~= nil then
-			if self.replication[REPLICATION_ALL] == true then
+			--[[if self.replication[REPLICATION_ALL] == true then
 				for player in pairs(ReadyPlayers) do
 					RemoteSetValues:FireClient(player, self_id, path, values)
 				end
@@ -390,7 +395,18 @@ function Replica:SetValues(path: {string}, values: {[string]: any})
 				for player in pairs(self.replication) do
 					RemoteSetValues:FireClient(player, self_id, path, values)
 				end
+			end]]
+			local players = EMPTY_TABLE
+			if self.replication[REPLICATION_ALL] == true then
+				players = ReadyPlayers
+			else
+				players = self.replication
 			end
+			Zap.SetValues.FireSet(players, {
+				replica_id = self_id,
+				path = path,
+				values = values
+			})
 		end
 	end
 	
@@ -415,7 +431,7 @@ function Replica:TableInsert(path: {string}, value: any, index: number?): number
 	if WriteFlag == false then
 		local self_id = self.Id
 		if self.replication ~= nil then
-			if self.replication[REPLICATION_ALL] == true then
+			--[[if self.replication[REPLICATION_ALL] == true then
 				for player in pairs(ReadyPlayers) do
 					RemoteTableInsert:FireClient(player, self_id, path, value, index)
 				end
@@ -423,7 +439,19 @@ function Replica:TableInsert(path: {string}, value: any, index: number?): number
 				for player in pairs(self.replication) do
 					RemoteTableInsert:FireClient(player, self_id, path, value, index)
 				end
+			end]]
+			local players = EMPTY_TABLE
+			if self.replication[REPLICATION_ALL] == true then
+				players = ReadyPlayers
+			else
+				players = self.replication
 			end
+			Zap.TableInsert.FireSet(players, {
+				replica_id = self_id,
+				path = path,
+				value = value,
+				index = index
+			})
 		end
 	end
 	
@@ -446,7 +474,7 @@ function Replica:TableRemove(path: {string}, index: number): any
 	if WriteFlag == false then
 		local self_id = self.Id
 		if self.replication ~= nil then
-			if self.replication[REPLICATION_ALL] == true then
+			--[[if self.replication[REPLICATION_ALL] == true then
 				for player in pairs(ReadyPlayers) do
 					RemoteTableRemove:FireClient(player, self_id, path, index)
 				end
@@ -454,7 +482,18 @@ function Replica:TableRemove(path: {string}, index: number): any
 				for player in pairs(self.replication) do
 					RemoteTableRemove:FireClient(player, self_id, path, index)
 				end
+			end]]
+			local players = EMPTY_TABLE
+			if self.replication[REPLICATION_ALL] == true then
+				players = ReadyPlayers
+			else
+				players = self.replication
 			end
+			Zap.TableRemove.FireSet(players, {
+				replica_id = self_id,
+				path = path,
+				index = index
+			})
 		end
 	end
 	
@@ -477,7 +516,7 @@ function Replica:Write(function_name: string, ...): ...any
 	WriteFlag = false
 	
 	if return_params[1] ~= true then
-		error(`[{script.Name}]: (WriteLib) ` .. tostring(return_params[2]))
+		error(`[Replica Server]: (WriteLib) ` .. tostring(return_params[2]))
 	end
 	
 	table.remove(return_params, 1)
@@ -488,7 +527,7 @@ function Replica:Write(function_name: string, ...): ...any
 	local fn_id = write_lib_entry.Id
 	
 	if self.replication ~= nil then
-		if self.replication[REPLICATION_ALL] == true then
+		--[[if self.replication[REPLICATION_ALL] == true then
 			for player in pairs(ReadyPlayers) do
 				RemoteWrite:FireClient(player, self_id, fn_id, ...)
 			end
@@ -496,7 +535,18 @@ function Replica:Write(function_name: string, ...): ...any
 			for player in pairs(self.replication) do
 				RemoteWrite:FireClient(player, self_id, fn_id, ...)
 			end
+		end]]
+		local players = EMPTY_TABLE
+		if self.replication[REPLICATION_ALL] == true then
+			players = ReadyPlayers
+		else
+			players = self.replication
 		end
+		Zap.Write.FireSet(players, {
+			replica_id = self_id,
+			fn_id = fn_id,
+			params = {...}
+		})
 	end
 	
 	return table.unpack(return_params)
@@ -506,7 +556,11 @@ end
 function Replica:FireClient(player, ...)
 	if self.replication ~= nil then
 		if (self.replication[REPLICATION_ALL] == true and ReadyPlayers[player] == true) or self.replication[player] ~= nil then
-			RemoteSignal:FireClient(player, self.Id, ...)
+			--RemoteSignal:FireClient(player, self.Id, ...)
+			Zap.ServerSignal.Fire(player, {
+				replica_id = self.Id,
+				params = {...}
+			})
 		end
 	end
 end
@@ -514,7 +568,7 @@ end
 function Replica:FireAllClients(...)
 	local self_id = self.Id
 	if self.replication ~= nil then
-		if self.replication[REPLICATION_ALL] == true then
+		--[[if self.replication[REPLICATION_ALL] == true then
 			for player in pairs(ReadyPlayers) do
 				RemoteSignal:FireClient(player, self_id, ...)
 			end
@@ -522,14 +576,29 @@ function Replica:FireAllClients(...)
 			for player in pairs(self.replication) do
 				RemoteSignal:FireClient(player, self_id, ...)
 			end
+		end]]
+		local players = EMPTY_TABLE
+		if self.replication[REPLICATION_ALL] == true then
+			players = ReadyPlayers
+		else
+			players = self.replication
 		end
+		Zap.ServerSignal.FireSet(players, {
+			replica_id = self_id,
+			params = {...}
+		})
 	end
 end
 
 function Replica:UFireClient(player, ...)
 	if self.replication ~= nil then
 		if (self.replication[REPLICATION_ALL] == true and ReadyPlayers[player] == true) or self.replication[player] ~= nil then
-			RemoteSignalUnreliable:FireClient(player, self.Id, ...)
+			--RemoteSignalUnreliable:FireClient(player, self.Id, ...)
+			print("[Zappified Replica Server]: Sending Unreliable Signal is unsupported, sending Reliable instead")
+			Zap.ServerSignal.Fire(player, {
+				replica_id = self.Id,
+				params = {...}
+			})
 		end
 	end
 end
@@ -537,7 +606,7 @@ end
 function Replica:UFireAllClients(...)
 	local self_id = self.Id
 	if self.replication ~= nil then
-		if self.replication[REPLICATION_ALL] == true then
+		--[[if self.replication[REPLICATION_ALL] == true then
 			for player in pairs(ReadyPlayers) do
 				RemoteSignalUnreliable:FireClient(player, self_id, ...)
 			end
@@ -545,26 +614,36 @@ function Replica:UFireAllClients(...)
 			for player in pairs(self.replication) do
 				RemoteSignalUnreliable:FireClient(player, self_id, ...)
 			end
+		end]]
+		local players = EMPTY_TABLE
+		if self.replication[REPLICATION_ALL] == true then
+			players = ReadyPlayers
+		else
+			players = self.replication
 		end
+		Zap.ServerSignal.FireSet(players, {
+			replica_id = self_id,
+			params = {...}
+		})
 	end
 end
 
 function Replica:SetParent(new_parent)
 	
 	if type(new_parent) ~= "table" or getmetatable(new_parent) ~= Replica then
-		error(`[{script.Name}]: new_parent is not a Replica ({tostring(new_parent)})`)
+		error(`[Replica Server]: new_parent is not a Replica ({tostring(new_parent)})`)
 	elseif Replicas[new_parent.Id] == nil then
-		error(`[{script.Name}]: Can't set destroyed Replica as parent`)
+		error(`[Replica Server]: Can't set destroyed Replica as parent`)
 	end
 	
 	-- Top Replica / Bind check:
 	
 	if TopReplicas[self] ~= nil then
-		error(`[{script.Name}]: Can't change parent for top level Replica`)
+		error(`[Replica Server]: Can't change parent for top level Replica`)
 	end
 	
 	if self.BoundInstance ~= nil then
-		error(`[{script.Name}]: Can't change parent for bound Replica`)
+		error(`[Replica Server]: Can't change parent for bound Replica`)
 	end
 	
 	-- Recursion check:
@@ -574,7 +653,7 @@ function Replica:SetParent(new_parent)
 	while recursion_check ~= nil do
 		recursion_check = recursion_check.Parent
 		if recursion_check == self then
-			error(`[{script.Name}]: Can't set descendant Replica as parent`)
+			error(`[Replica Server]: Can't set descendant Replica as parent`)
 		end
 	end
 	
@@ -641,11 +720,16 @@ function Replica:SetParent(new_parent)
 	if old_parent ~= nil and old_parent.replication ~= nil then
 		if new_parent.replication ~= old_parent.replication and new_subscriptions ~= ReadyPlayers then
 			
+			local players: {[Player]: true} = {}
 			for player in pairs(old_subscriptions) do
 				if new_subscriptions[player] == nil then
-					RemoteDestroy:FireClient(player, self_id)
+					--RemoteDestroy:FireClient(player, self_id)
+					players[player] = true
 				end
 			end
+			Zap.Destroy.FireSet(players, {
+				replica_id = self_id,
+			})
 			
 		end
 	end
@@ -654,23 +738,46 @@ function Replica:SetParent(new_parent)
 	
 	if new_parent.replication ~= nil then
 		
-		local custom_creation
+		--local custom_creation
 		
+		local playersParented: {[Player]: true} = {}
+		local playersCreated: {[Player]: true} = {}
 		for player in pairs(new_subscriptions) do
 			
 			if old_subscriptions[player] == true then
-				RemoteParent:FireClient(player, self_id, parent_id) -- Subscription was retained
+				--RemoteParent:FireClient(player, self_id, parent_id) -- Subscription was retained
+				playersParented[player] = true
 			else
-				if custom_creation == nil then -- Generating custom_creation if at least one new subscription was made
+				--[[if custom_creation == nil then -- Generating custom_creation if at least one new subscription was made
 					custom_creation = {}
 					IterateGroup(self, function(group_replica)
 						local string_id = tostring(group_replica.Id)
 						custom_creation[string_id] = parent_creation[string_id]
 					end)
 				end
-				RemoteCreate:FireClient(player, custom_creation, self_id)
+				RemoteCreate:FireClient(player, custom_creation, self_id)]]
+				playersCreated[player] = true
 			end
 			
+		end
+		if next(playersParented) then
+			Zap.Parent.FireSet(playersParented, {
+				replica_id = self_id,
+				parent_id = parent_id,
+			})
+		end
+		if next(playersCreated) then
+			-- Generating custom_creation if at least one new subscription was made
+			local custom_creation = {}
+			IterateGroup(self, function(group_replica)
+				local string_id = tostring(group_replica.Id)
+				custom_creation[string_id] = parent_creation[string_id]
+			end)
+
+			Zap.Create.FireSet(playersCreated, {
+				creation = custom_creation,
+				root_id = self_id,
+			})
 		end
 		
 	end
@@ -680,19 +787,19 @@ end
 function Replica:BindToInstance(instance: Instance)
 	
 	if typeof(instance) ~= "Instance" then
-		error(`[{script.Name}]: "instance" argument is not an Instance ({tostring(instance)})`)
+		error(`[Replica Server]: "instance" argument is not an Instance ({tostring(instance)})`)
 	end
 	
 	if self.Parent ~= nil then
-		error(`[{script.Name}]: Can't bind Replica parented to another Replica`)
+		error(`[Replica Server]: Can't bind Replica parented to another Replica`)
 	end
 	
 	if self.BoundInstance ~= nil then
-		error(`[{script.Name}]: Can't change Replica bind to another Instance`)
+		error(`[Replica Server]: Can't change Replica bind to another Instance`)
 	end
 	
-	if instance:IsA("Model") == true and (instance.ModelStreamingMode == Enum.ModelStreamingMode.Default or instance.ModelStreamingMode == Enum.ModelStreamingMode.Nonatomic) then
-		warn(`[{script.Name}]: Bound Replica to a model that has improper "ModelStreamingMode" setup; Traceback:\n` .. debug.traceback())
+	if instance:IsA("Model") and (instance.ModelStreamingMode == Enum.ModelStreamingMode.Default or instance.ModelStreamingMode == Enum.ModelStreamingMode.Nonatomic) then
+		warn(`[Replica Server]: Bound Replica to a model that has improper "ModelStreamingMode" setup; Traceback:\n` .. debug.traceback())
 	end
 	
 	local bind_value = BindValuePrefab:Clone()
@@ -706,7 +813,7 @@ function Replica:BindToInstance(instance: Instance)
 	
 	local self_id = self.Id
 	if self.replication ~= nil then
-		if self.replication[REPLICATION_ALL] == true then
+		--[[if self.replication[REPLICATION_ALL] == true then
 			for player in pairs(ReadyPlayers) do
 				RemoteBind:FireClient(player, self_id)
 			end
@@ -714,7 +821,16 @@ function Replica:BindToInstance(instance: Instance)
 			for player in pairs(self.replication) do
 				RemoteBind:FireClient(player, self_id)
 			end
+		end]]
+		local players = EMPTY_TABLE
+		if self.replication[REPLICATION_ALL] == true then
+			players = ReadyPlayers
+		else
+			players = self.replication
 		end
+		Zap.Bind.FireSet(players, {
+			replica_id = self_id,
+		})
 	end
 	
 end
@@ -722,7 +838,7 @@ end
 function Replica:Replicate()
 	
 	if self.Parent ~= nil then
-		error(`[{script.Name}]: Can't selectively replicate Replica parented to another Replica`)
+		error(`[Replica Server]: Can't selectively replicate Replica parented to another Replica`)
 	end
 	
 	if self.creation == nil then
@@ -735,14 +851,20 @@ function Replica:Replicate()
 	local creation = self.creation
 	local replication = self.replication
 	
+	local players: {[Player]: true} = {}
 	for player in pairs(ReadyPlayers) do
 		if replication[player] == nil then
-			RemoteCreate:FireClient(player, creation)
+			--RemoteCreate:FireClient(player, creation)
+			players[player] = true
 		else
 			local selective_lookup = SelectiveSubscriptions[player]
 			selective_lookup[self] = nil
 		end
 	end
+	
+	Zap.Create.FireSet(players, {
+		creation = creation,
+	})
 	
 	table.clear(replication)
 	replication[REPLICATION_ALL] = true
@@ -753,7 +875,7 @@ end
 function Replica:DontReplicate()
 	
 	if self.Parent ~= nil then
-		error(`[{script.Name}]: Can't selectively replicate Replica parented to another Replica`)
+		error(`[Replica Server]: Can't selectively replicate Replica parented to another Replica`)
 	end
 	
 	local replication = self.replication
@@ -766,16 +888,23 @@ function Replica:DontReplicate()
 	
 	local self_id = self.Id
 	
+	local players: {[Player]: true} = {}
 	if replication[REPLICATION_ALL] == true then
 		for player in pairs(ReadyPlayers) do
-			RemoteDestroy:FireClient(player, self_id)
+			--RemoteDestroy:FireClient(player, self_id)
+			players[player] = true
 		end
 	else
 		for player in pairs(replication) do
-			RemoteDestroy:FireClient(player, self_id)
+			--RemoteDestroy:FireClient(player, self_id)
+			players[player] = true
 			SelectiveSubscriptions[player][self] = nil
 		end
 	end
+	
+	Zap.Destroy.FireSet(players, {
+		replica_id = self_id,
+	})
 	
 	table.clear(replication)
 	
@@ -784,18 +913,18 @@ end
 function Replica:Subscribe(player: Player)
 	
 	if self.Parent ~= nil then
-		error(`[{script.Name}]: Can't selectively replicate Replica parented to another Replica`)
+		error(`[Replica Server]: Can't selectively replicate Replica parented to another Replica`)
 	end
 	
 	if self.creation == nil then
 		GenerateCreation(self)
 		TopReplicas[self] = true
 	elseif self.replication[REPLICATION_ALL] == true then
-		error(`[{script.Name}]: "Subscribe()" is locked after calling "Replicate()"`)
+		error(`[Replica Server]: "Subscribe()" is locked after calling "Replicate()"`)
 	end
 	
 	if ReadyPlayers[player] == nil then
-		warn(`[{script.Name}]: Called "Subscribe()" on a non-ready player; Traceback:\n` .. debug.traceback())
+		warn(`[Replica Server]: Called "Subscribe()" on a non-ready player; Traceback:\n` .. debug.traceback())
 		return
 	end
 	
@@ -808,14 +937,17 @@ function Replica:Subscribe(player: Player)
 	
 	replication[player] = true
 	SelectiveSubscriptions[player][self] = true
-	RemoteCreate:FireClient(player, creation)
+	--RemoteCreate:FireClient(player, creation)
+	Zap.Create.Fire(player, {
+		creation = creation,
+	})
 	
 end
 
 function Replica:Unsubscribe(player: Player)
 	
 	if self.Parent ~= nil then
-		error(`[{script.Name}]: Can't selectively replicate Replica parented to another Replica`)
+		error(`[Replica Server]: Can't selectively replicate Replica parented to another Replica`)
 	end
 	
 	local replication = self.replication
@@ -825,13 +957,16 @@ function Replica:Unsubscribe(player: Player)
 	end
 	
 	if replication[REPLICATION_ALL] == true then
-		error(`[{script.Name}]: "Unsubscribe()" is locked after calling "Replicate()"`)
+		error(`[Replica Server]: "Unsubscribe()" is locked after calling "Replicate()"`)
 	end
 	
 	if replication[player] ~= nil then
 		replication[player] = nil
 		SelectiveSubscriptions[player][self] = nil
-		RemoteDestroy:FireClient(player, self.Id)
+		--RemoteDestroy:FireClient(player, self.Id)
+		Zap.Destroy.Fire(player, {
+			replica_id = self.Id,
+		})
 	end
 	
 end
@@ -889,18 +1024,24 @@ function Replica:Destroy()
 	-- Destroy replica for all clients who were replicated to:
 	
 	if self.replication ~= nil then
+		local players: {[Player]: true} = {}
 		if self.replication[REPLICATION_ALL] == true then
 			for player in pairs(ReadyPlayers) do
-				RemoteDestroy:FireClient(player, self_id)
+				--RemoteDestroy:FireClient(player, self_id)
+				players[player] = true
 			end
 		else
 			for player in pairs(self.replication) do
-				RemoteDestroy:FireClient(player, self_id)
+				--RemoteDestroy:FireClient(player, self_id)
+				players[player] = true
 				if is_top == true then
 					SelectiveSubscriptions[player][self] = nil
 				end
 			end
 		end
+		Zap.Destroy.FireSet(players, {
+			replica_id = self_id,
+		})
 	end
 	
 	-- Clearing hierarchy:
@@ -933,7 +1074,7 @@ do -- Destroyed replica metatable:
 				LockedReplica[name] = fn
 			else
 				LockedReplica[name] = function(self)
-					error(`[{script.Name}]: Tried to call method "{name}" for a destroyed replica; {self:Identify()}`)
+					error(`[Replica Server]: Tried to call method "{name}" for a destroyed replica; {self:Identify()}`)
 				end
 			end
 		end
@@ -943,7 +1084,7 @@ end
 
 -- New player data replication:
 
-RemoteRequestData.OnServerEvent:Connect(function(player: Player)
+local function OnRequestData(player: Player)
 	
 	if ReadyPlayers[player] ~= nil and player:IsDescendantOf(Players) == true then
 		return
@@ -957,17 +1098,22 @@ RemoteRequestData.OnServerEvent:Connect(function(player: Player)
 	for replica in pairs(ReplicationAllReplicas) do
 		table.insert(creation, replica.creation)
 	end
-	RemoteCreate:FireClient(player, creation)
+	--RemoteCreate:FireClient(player, creation)
+	Zap.Create.Fire(player, {
+		creation = creation,
+	})
 	
 	-- Let the client know that all replica data has been sent:
-	RemoteRequestData:FireClient(player)
+	--RemoteRequestData:FireClient(player)
+	Zap.InitialDataRecieved.Fire(player)
 	
 	-- Set player to active:
 	ReadyPlayers[player] = true
 	SelectiveSubscriptions[player] = {}
 	Replica.NewReadyPlayer:Fire(player)
 	
-end)
+end
+Zap.RequestData.SetCallback(OnRequestData)
 
 -- Client-invoked replica signals:
 
@@ -989,8 +1135,11 @@ local function RemoteSignalHandle(player: Player, id: number, ...)
 	
 end
 
-RemoteSignal.OnServerEvent:Connect(RemoteSignalHandle)
-RemoteSignalUnreliable.OnServerEvent:Connect(RemoteSignalHandle)
+--RemoteSignal.OnServerEvent:Connect(RemoteSignalHandle)
+--RemoteSignalUnreliable.OnServerEvent:Connect(RemoteSignalHandle)
+Zap.ClientSignal.SetCallback(function(data)
+	RemoteSignalHandle(data.player, data.replica_id, table.unpack(data.params))
+end)
 
 -- Player leave handling:
 

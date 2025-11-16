@@ -1,3 +1,7 @@
+-- Modified by bdidk235 (marked with 'deviation')
+--!native
+--!optimize 2
+--!nolint
 --[[
 MAD STUDIO
 
@@ -67,8 +71,8 @@ MAD STUDIO
 
 ----- Dependencies -----
 
+-- deviation
 local ReplicaShared = game.ReplicatedStorage.ReplicaShared
-local Remote = require(ReplicaShared.Remote)
 local Signal = require(ReplicaShared.Signal)
 local Maid = require(ReplicaShared.Maid)
 
@@ -92,19 +96,8 @@ local BindInstances = {} -- {[id]: Instance}
 
 local NewReplicaListeners = {} -- {[token]: Signal}
 
-local RemoteRequestData = Remote.New("ReplicaRequestData") -- Fired client-side when the client loads for the first time
-
-local RemoteSet = Remote.New("ReplicaSet")                 -- (replica_id, path, value)
-local RemoteSetValues = Remote.New("ReplicaSetValues")     -- (replica_id, path, values)
-local RemoteTableInsert = Remote.New("ReplicaTableInsert") -- (replica_id, path, value, index)
-local RemoteTableRemove = Remote.New("ReplicaTableRemove") -- (replica_id, path, index)
-local RemoteWrite = Remote.New("ReplicaWrite")             -- (replica_id, fn_id, ...)
-local RemoteSignal = Remote.New("ReplicaSignal")           -- (replica_id, ...)
-local RemoteParent = Remote.New("ReplicaParent")           -- (replica_id, parent_id)
-local RemoteCreate = Remote.New("ReplicaCreate")           -- (creation, root_id?) or ({creation, ...})
-local RemoteBind = Remote.New("ReplicaBind")               -- (replica_id)
-local RemoteDestroy = Remote.New("ReplicaDestroy")         -- (replica_id)
-local RemoteSignalUnreliable = Remote.New("ReplicaSignalUnreliable", true)   -- (replica_id, ...)
+-- deviation
+local Zap = require(script.Parent.ReplicaZap.Client)
 
 local WriteLibCache: {[ModuleScript]: {[string | number]: {Name: string, Id: number, fn: (...any) -> (...any)}}} = {}
 local ReplicationFlag = false
@@ -156,7 +149,7 @@ export type Replica = {
 	OnClientEvent: {Connect: (self: any, listener: (...any) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	Maid: typeof(Maid),
 
-	OnSet: (self: any, path: {}, listener: () -> ()) -> (Signal.Connection),
+	OnSet: (self: any, path: {string}, listener: (value: any?, old_value: any?) -> ()) -> (Signal.Connection),
 	OnWrite: (self: any, function_name: string, listener: (...any) -> ()) -> (Signal.Connection),
 	OnChange: (self: any, listener: (action: "Set" | "SetValues" | "TableInsert" | "TableRemove", path: {any}, param1: any, param2: any?) -> ()) -> (Signal.Connection),
 	GetChild: (self: any, token: string) -> (Replica?),
@@ -245,13 +238,15 @@ function Replica.RequestData()
 	
 	task.spawn(function()
 
-		RemoteRequestData:FireServer()
+		--RemoteRequestData:FireServer()
+		Zap.RequestData.Fire()
 		
 		while task.wait(REQUEST_DATA_REPEAT) do
 			if Replica.IsReady == true then
 				break
 			end
-			RemoteRequestData:FireServer()
+			--RemoteRequestData:FireServer()
+			Zap.RequestData.Fire()
 		end
 		
 	end)
@@ -261,7 +256,7 @@ end
 function Replica.OnNew(token: string, listener: (replica: Replica) -> ()): Signal.Connection
 	
 	if type(token) ~= "string" then
-		error(`[{script.Name}]: "token" must be a string`)
+		error(`[Replica Client]: "token" must be a string`)
 	end
 	
 	local listeners = NewReplicaListeners[token]
@@ -340,7 +335,7 @@ end
 
 function Replica:GetChild(token: string): Replica?
 	if type(token) ~= "string" then
-		error(`[{script.Name}]: "token" must be a string`)
+		error(`[Replica Client]: "token" must be a string`)
 	end
 	for replica in pairs(self.Children) do
 		if replica.Token == token then
@@ -351,11 +346,20 @@ function Replica:GetChild(token: string): Replica?
 end
 
 function Replica:FireServer(...)
-	RemoteSignal:FireServer(self.Id, ...)
+	--RemoteSignal:FireServer(self.Id, ...)
+	Zap.ClientSignal.Fire({
+		replica_id = self.Id,
+		params = { ... },
+	})
 end
 
 function Replica:UFireServer(...)
-	RemoteSignalUnreliable:FireServer(self.Id, ...)
+	--RemoteSignalUnreliable:FireServer(self.Id, ...)
+	print("[Zappified Replica Client]: Sending Unreliable Signal is unsupported, sending Reliable instead")
+	Zap.ClientSignal.Fire({
+		replica_id = self.Id,
+		params = { ... },
+	})
 end
 
 function Replica:Identify(): string
@@ -375,7 +379,7 @@ end
 function Replica:Set(path: {string}, value: any)
 	
 	if ReplicationFlag ~= true then
-		error(`[{script.Name}]: "Set()" can't be called outside of WriteLibs client-side`)
+		error(`[Replica Client]: "Set()" can't be called outside of WriteLibs client-side`)
 	end
 	
 	-- Apply local change:
@@ -403,7 +407,7 @@ end
 function Replica:SetValues(path: {string}, values: {[string]: any})
 	
 	if ReplicationFlag ~= true then
-		error(`[{script.Name}]: "SetValues()" can't be called outside of WriteLibs client-side`)
+		error(`[Replica Client]: "SetValues()" can't be called outside of WriteLibs client-side`)
 	end
 	
 	-- Apply local change:
@@ -425,7 +429,7 @@ end
 function Replica:TableInsert(path: {string}, value: any, index: number?): number
 	
 	if ReplicationFlag ~= true then
-		error(`[{script.Name}]: "TableInsert()" can't be called outside of WriteLibs client-side`)
+		error(`[Replica Client]: "TableInsert()" can't be called outside of WriteLibs client-side`)
 	end
 	
 	-- Apply local change:
@@ -452,7 +456,7 @@ end
 function Replica:TableRemove(path: {string}, index: number): any
 	
 	if ReplicationFlag ~= true then
-		error(`[{script.Name}]: "TableRemove()" can't be called outside of WriteLibs client-side`)
+		error(`[Replica Client]: "TableRemove()" can't be called outside of WriteLibs client-side`)
 	end
 	
 	-- Apply local change:
@@ -474,7 +478,7 @@ end
 function Replica:Write(function_name: string, ...): ...any
 	
 	if ReplicationFlag ~= true then
-		error(`[{script.Name}]: "Write()" can't be called outside of WriteLibs client-side`)
+		error(`[Replica Client]: "Write()" can't be called outside of WriteLibs client-side`)
 	end
 	
 	-- Apply local change:
@@ -665,7 +669,7 @@ local function BreadthCreationSort(creation: {}, root_id: number?, iterator: (Id
 	
 	if #error_creation ~= 0 then -- An error occurred while replicating a replica group.
 		
-		local msg = `[{script.Name}]: GROUP REPLICATION ERROR - Missing parents for:\n`
+		local msg = `[Replica Client]: GROUP REPLICATION ERROR - Missing parents for:\n`
 		
 		for i = 1, math.min(#error_creation, 50) do
 			local entry = error_creation[i]
@@ -696,74 +700,90 @@ end
 local function GetInternalReplica(id)
 	local replica = Replicas[id] or BindReplicas[id]
 	if replica == nil then
-		error(`[{script.Name}]: Received update for missing replica [Id:{id}]`)
+		error(`[Replica Client]: Received update for missing replica [Id:{id}]`)
 	end
 	return replica
 end
 
 ----- Init -----
 
-RemoteRequestData.OnClientEvent:Connect(function()
+local function OnDataRecieved()
 	
 	if Replica.IsReady == true then
 		return
 	end
 	
 	Replica.IsReady = true
-	print(`[{script.Name}]: Initial data received`)
+	print(`[Replica Client]: Initial data received`)
 	Replica.OnLocalReady:Fire()
 	
-end)
+end
+Zap.InitialDataRecieved.SetCallback(OnDataRecieved)
 
-RemoteSet.OnClientEvent:Connect(function(id: number, path: {}, value: any)
+local function OnSet(id: number, path: {}, value: any)
 	local replica = GetInternalReplica(id)
 	ReplicationFlag = true
 	local success, msg = pcall(replica.Set, replica, path, value)
 	ReplicationFlag = false
 	if success ~= true then
-		error(`[{script.Name}]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
+		error(`[Replica Client]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
 	end
+end
+Zap.Set.SetCallback(function(data)
+	OnSet(data.replica_id, data.path, data.value)
 end)
 
-RemoteSetValues.OnClientEvent:Connect(function(id: number, path: {}, values: {})
+local function OnSetValues(id: number, path: {}, values: {})
 	local replica = GetInternalReplica(id)
 	ReplicationFlag = true
 	local success, msg = pcall(replica.SetValues, replica, path, values)
 	ReplicationFlag = false
 	if success ~= true then
-		error(`[{script.Name}]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
+		error(`[Replica Client]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
 	end
+end
+Zap.SetValues.SetCallback(function(data)
+	OnSetValues(data.replica_id, data.path, data.values)
 end)
 
-RemoteTableInsert.OnClientEvent:Connect(function(id: number, path: {}, value: any, index: number?)
+local function OnTableInsert(id: number, path: {}, value: any, index: number?)
 	local replica = GetInternalReplica(id)
 	ReplicationFlag = true
 	local success, msg = pcall(replica.TableInsert, replica, path, value, index)
 	ReplicationFlag = false
 	if success ~= true then
-		error(`[{script.Name}]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
+		error(`[Replica Client]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
 	end
+end
+Zap.TableInsert.SetCallback(function(data)
+	OnTableInsert(data.replica_id, data.path, data.value, data.index)
 end)
 
-RemoteTableRemove.OnClientEvent:Connect(function(id: number, path: {}, index: number)
+local function OnTableRemove(id: number, path: {}, index: number)
 	local replica = GetInternalReplica(id)
 	ReplicationFlag = true
 	local success, msg = pcall(replica.TableRemove, replica, path, index)
 	ReplicationFlag = false
 	if success ~= true then
-		error(`[{script.Name}]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
+		error(`[Replica Client]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
 	end
+end
+Zap.TableRemove.SetCallback(function(data)
+	OnTableRemove(data.replica_id, data.path, data.index)
 end)
 
-RemoteWrite.OnClientEvent:Connect(function(id: number, fn_id: number, ...)
+local function OnWrite(id: number, fn_id: number, ...)
 	local replica = GetInternalReplica(id)
 	local fn_name = replica.write_lib[fn_id].Name
 	ReplicationFlag = true
 	local success, msg = pcall(replica.Write, replica, fn_name, ...)
 	ReplicationFlag = false
 	if success ~= true then
-		error(`[{script.Name}]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
+		error(`[Replica Client]: Error while updating replica:\n{replica:Identify()}\n` .. msg)
 	end
+end
+Zap.Write.SetCallback(function(data)
+	OnWrite(data.replica_id, data.func_id, table.unpack(data.params))
 end)
 
 local function RemoteSignalHandle(id: number, ...)
@@ -771,10 +791,13 @@ local function RemoteSignalHandle(id: number, ...)
 	replica.OnClientEvent:Fire(...)
 end
 
-RemoteSignal.OnClientEvent:Connect(RemoteSignalHandle)
-RemoteSignalUnreliable.OnClientEvent:Connect(RemoteSignalHandle)
+--RemoteSignal.OnClientEvent:Connect(RemoteSignalHandle)
+--RemoteSignalUnreliable.OnClientEvent:Connect(RemoteSignalHandle)
+Zap.ServerSignal.SetCallback(function(data)
+	RemoteSignalHandle(data.replica_id, table.unpack(data.params))
+end)
 
-RemoteParent.OnClientEvent:Connect(function(id: number, parent_id: number)
+local function OnParent(id: number, parent_id: number)
 	
 	local replica = GetInternalReplica(id)
 	local old_parent = replica.Parent
@@ -793,9 +816,12 @@ RemoteParent.OnClientEvent:Connect(function(id: number, parent_id: number)
 		ReplicaToBindBuffer(replica)
 	end
 	
+end
+Zap.Parent.SetCallback(function(data)
+	OnParent(data.replica_id, data.parent_id)
 end)
 
-RemoteCreate.OnClientEvent:Connect(function(creation: {}, root_id: number?) -- (creation) or ({creation, ...})
+local function OnCreate(creation: {}, root_id: number?) -- (creation) or ({creation, ...})
 	
 	local announce_buffer = {} -- {replica, ...} -- Announce these
 	
@@ -852,9 +878,12 @@ RemoteCreate.OnClientEvent:Connect(function(creation: {}, root_id: number?) -- (
 		end
 	end
 
+end
+Zap.Create.SetCallback(function(data)
+	OnCreate(data.creation, data.root_id)
 end)
 
-RemoteBind.OnClientEvent:Connect(function(id: number)
+local function OnBind(id: number)
 	
 	local replica = GetInternalReplica(id)
 	replica.Tags[BIND_TAG] = true
@@ -866,11 +895,17 @@ RemoteBind.OnClientEvent:Connect(function(id: number)
 		ReplicaToBindBuffer(replica)
 	end
 	
+end
+Zap.Bind.SetCallback(function(data)
+	OnBind(data.replica_id)
 end)
 
-RemoteDestroy.OnClientEvent:Connect(function(id: number)
+local function OnDestroy(id: number)
 	local replica = GetInternalReplica(id)
 	DestroyReplica(replica)
+end
+Zap.Destroy.SetCallback(function(data)
+	OnDestroy(data.replica_id)
 end)
 
 -- Replica bind system using CollectionService:
